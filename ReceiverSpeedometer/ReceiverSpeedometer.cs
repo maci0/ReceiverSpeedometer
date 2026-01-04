@@ -14,6 +14,7 @@ public class Main : Mod
     private const float SpeedUpdateInterval = 0.15f;
     private const float ReceiverScanInterval = 20.0f;
     private const float RaftPivotScanInterval = 3.0f;
+    private const float ReceiverCacheScanInterval = 60.0f;
 
     // Fast bootstrapping when loaded from main menu
     private const float BootstrapScanInterval = 0.5f;     // keep low, runs only until bound
@@ -34,6 +35,7 @@ public class Main : Mod
     private float _nextSpeedUpdate;
     private float _nextReceiverScan;
     private float _nextPivotScan;
+    private float _nextReceiverCacheScan;
 
     private float _speed;
     private float _smoothedSpeed;
@@ -48,6 +50,7 @@ public class Main : Mod
     private readonly Dictionary<int, TextMeshProUGUI> _receiverGauge = new Dictionary<int, TextMeshProUGUI>();
     private readonly Dictionary<int, int> _receiverGaugeState = new Dictionary<int, int>();
     private readonly List<int> _deadIds = new List<int>(16);
+    private readonly List<Transform> _receiverCache = new List<Transform>(16);
 
     private static readonly string[] _gaugeCache = BuildGaugeCache();
 
@@ -60,12 +63,14 @@ public class Main : Mod
     {
         _bootstrapStartT = Time.time;
         _nextBootstrapScan = 0f;
+        _nextReceiverCacheScan = 0f;
 
         // Do not assume we're in game yet
         _raftPivot = null;
         _receiverSpeed.Clear();
         _receiverGauge.Clear();
         _receiverGaugeState.Clear();
+        _receiverCache.Clear();
     }
 
     public void Update()
@@ -156,6 +161,7 @@ public class Main : Mod
 
         _receiverGaugeState.Clear();
         _deadIds.Clear();
+        _receiverCache.Clear();
 
         _bootstrapping = true;
         _raftPivot = null;
@@ -228,7 +234,8 @@ public class Main : Mod
             var spd = kv.Value;
 
             bool spdAlive = IsAlive(spd);
-            bool gaugeAlive = _receiverGauge.TryGetValue(id, out var gAliveCheck) && IsAlive(gAliveCheck);
+            bool hasGauge = _receiverGauge.TryGetValue(id, out var gAliveCheck);
+            bool gaugeAlive = hasGauge && IsAlive(gAliveCheck);
 
             if (!spdAlive || !gaugeAlive)
             {
@@ -239,14 +246,18 @@ public class Main : Mod
             if (speedChanged)
                 spd.text = _cachedSpeedText;
 
-            if (_receiverGauge.TryGetValue(id, out var g) && IsAlive(g))
+            if (gaugeAlive)
             {
                 int last;
                 if (!_receiverGaugeState.TryGetValue(id, out last) || last != filled)
                 {
-                    g.text = _gaugeCache[filled];
+                    gAliveCheck.text = _gaugeCache[filled];
                     _receiverGaugeState[id] = filled;
                 }
+            }
+            else
+            {
+                _receiverGaugeState.Remove(id);
             }
         }
 
@@ -270,13 +281,31 @@ public class Main : Mod
     {
         RemoveDeadTracked();
 
-        foreach (Transform tr in Resources.FindObjectsOfTypeAll<Transform>())
+        float now = Time.time;
+        if (forceRebind || _receiverCache.Count == 0 || now >= _nextReceiverCacheScan)
         {
-            if (tr == null) continue;
-            if (!tr.gameObject.scene.IsValid()) continue;
-            if (!tr.gameObject.activeInHierarchy) continue;
-            if (!tr.name.StartsWith("Placeable_Reciever", StringComparison.Ordinal))
+            _nextReceiverCacheScan = now + ReceiverCacheScanInterval;
+            RefreshReceiverCache();
+        }
+
+        for (int i = _receiverCache.Count - 1; i >= 0; i--)
+        {
+            Transform tr = _receiverCache[i];
+            if (tr == null)
+            {
+                _receiverCache.RemoveAt(i);
                 continue;
+            }
+            if (!tr.gameObject.scene.IsValid())
+            {
+                _receiverCache.RemoveAt(i);
+                continue;
+            }
+            if (!tr.gameObject.activeInHierarchy)
+            {
+                _receiverCache.RemoveAt(i);
+                continue;
+            }
 
             int id = tr.gameObject.GetInstanceID();
 
@@ -332,7 +361,22 @@ public class Main : Mod
             _receiverGaugeState.Remove(id);
         }
 
-        _deadIds.Clear();
+    }
+
+    private void RefreshReceiverCache()
+    {
+        _receiverCache.Clear();
+
+        foreach (Transform tr in Resources.FindObjectsOfTypeAll<Transform>())
+        {
+            if (tr == null) continue;
+            if (!tr.gameObject.scene.IsValid()) continue;
+            if (!tr.gameObject.activeInHierarchy) continue;
+            if (!tr.name.StartsWith("Placeable_Reciever", StringComparison.Ordinal))
+                continue;
+
+            _receiverCache.Add(tr);
+        }
     }
 
     private void RemoveForReceiver(int id)
@@ -354,6 +398,8 @@ public class Main : Mod
         if (canvases == null || canvases.Length == 0)
             return null;
 
+        Canvas firstActive = null;
+
         foreach (var c in canvases)
         {
             if (c == null) continue;
@@ -361,7 +407,13 @@ public class Main : Mod
 
             if (c.GetComponentInChildren<Image>(true) != null || c.GetComponentInChildren<RawImage>(true) != null)
                 return c;
+
+            if (firstActive == null)
+                firstActive = c;
         }
+
+        if (firstActive != null)
+            return firstActive;
 
         return canvases[0];
     }
