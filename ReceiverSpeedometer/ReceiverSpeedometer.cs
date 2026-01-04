@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 using TMPro;
 using UnityEngine;
@@ -12,12 +13,9 @@ public class Main : Mod
     private static readonly Vector2 GaugeOffset = new Vector2(-60f, -95f);
 
     private const float SpeedUpdateInterval = 0.15f;
-    private const float ReceiverScanInterval = 20.0f;
-    private const float RaftPivotScanInterval = 3.0f;
-    private const float ReceiverCacheScanInterval = 15.0f;
-    // Fast bootstrapping when loaded from main menu
-    private const float BootstrapScanInterval = 0.5f;     // keep low, runs only until bound
-    private const float BootstrapTimeout = 60.0f;         // stop fast scanning after 60s anyway
+    private const float ReceiverScanInterval = 60.0f;
+    private const float RaftPivotScanInterval = 10.0f;
+    private const float ReceiverCacheScanInterval = 45.0f;
 
     private const string SpeedFormat = "SPD {0:0.0} m/s";
     private const float MaxValidSpeed = 500f;
@@ -40,6 +38,7 @@ public class Main : Mod
     private string _cachedSpeedText = "SPD 0.0 m/s";
     private string _lastAppliedSpeedText = "";
 
+    private Raft _cachedRaft;
     private Transform _raftPivot;
     private Vector3 _lastRaftPos;
     private float _lastRaftT;
@@ -47,54 +46,31 @@ public class Main : Mod
     private readonly Dictionary<int, TextMeshProUGUI> _receiverSpeed = new Dictionary<int, TextMeshProUGUI>();
     private readonly Dictionary<int, TextMeshProUGUI> _receiverGauge = new Dictionary<int, TextMeshProUGUI>();
     private readonly Dictionary<int, int> _receiverGaugeState = new Dictionary<int, int>();
-    private readonly List<int> _deadIds = new List<int>(16);
     private readonly List<Transform> _receiverCache = new List<Transform>(16);
 
-    private static readonly string[] _gaugeCache = BuildGaugeCache();
-
     private readonly StringBuilder _stringBuilder = new StringBuilder(64);
-    private readonly Dictionary<float, string> _speedTextCache = new Dictionary<float, string>(32);
-    private bool _bootstrapping = true;
-    private float _bootstrapStartT;
-    private float _nextBootstrapScan;
+    private float _cachedSpeedValue;
 
     public void Start()
     {
-        _bootstrapStartT = Time.time;
-        _nextBootstrapScan = _nextReceiverCacheScan = 0f;
-        _raftPivot = null;
-        _receiverSpeed.Clear();
-        _receiverGauge.Clear();
-        _receiverGaugeState.Clear();
-        _receiverCache.Clear();
+        Cleanup();
+    }
+
+    public override void WorldEvent_WorldLoaded()
+    {
+        _cachedRaft = ComponentManager<Raft>.Value;
+        float now = Time.time;
+        _nextSpeedUpdate = now + SpeedUpdateInterval;
+        _nextReceiverScan = now + ReceiverScanInterval;
+        _nextPivotScan = now + RaftPivotScanInterval;
+        _nextReceiverCacheScan = 0f;
+        FindRaftPivot(true);
+        ScanReceivers(false);
     }
 
     public void Update()
     {
         float now = Time.time;
-
-        if (_bootstrapping)
-        {
-            if (now >= _nextBootstrapScan)
-            {
-                _nextBootstrapScan = now + BootstrapScanInterval;
-
-                if (_raftPivot == null || !IsValid(_raftPivot))
-                    FindRaftPivot(true);
-
-                ScanReceivers(false);
-                if ((_raftPivot != null && _receiverSpeed.Count > 0) || now - _bootstrapStartT > BootstrapTimeout)
-                {
-                    _bootstrapping = false;
-                    _nextPivotScan = now + RaftPivotScanInterval;
-                    _nextReceiverScan = now + ReceiverScanInterval;
-                    _nextSpeedUpdate = now + SpeedUpdateInterval;
-                }
-            }
-
-            UpdateLabels();
-            return;
-        }
         if (now >= _nextPivotScan)
         {
             _nextPivotScan = now + RaftPivotScanInterval;
@@ -135,40 +111,61 @@ public class Main : Mod
         _receiverSpeed.Clear();
         _receiverGauge.Clear();
         _receiverGaugeState.Clear();
-        _deadIds.Clear();
         _receiverCache.Clear();
-        _bootstrapping = true;
+        _cachedRaft = null;
         _raftPivot = null;
     }
 
     private string GetCachedSpeedText(float speed)
     {
         float rounded = Mathf.Round(speed * 10f) / 10f;
-        if (_speedTextCache.TryGetValue(rounded, out string cached)) return cached;
-        if (_speedTextCache.Count > 100) _speedTextCache.Clear();
-        return _speedTextCache[rounded] = string.Format(SpeedFormat, rounded);
+        if (!Mathf.Approximately(rounded, _cachedSpeedValue))
+        {
+            _cachedSpeedValue = rounded;
+            _cachedSpeedText = string.Format(SpeedFormat, rounded);
+        }
+        return _cachedSpeedText;
     }
 
     private void FindRaftPivot(bool resetBaseline)
     {
         _raftPivot = null;
-        foreach (Transform t in Resources.FindObjectsOfTypeAll<Transform>())
+        Raft raftComponent = _cachedRaft;
+        if (raftComponent != null)
         {
-            if (t == null) continue;
-            if (!t.gameObject.scene.IsValid()) continue;
-            if (!t.gameObject.activeInHierarchy) continue;
-            if (t.name != "LockedPivot") continue;
-
-            Transform rotatePivot = t.parent;
-            if (rotatePivot == null || rotatePivot.name != "RotatePivot") continue;
-
-            Transform raft = rotatePivot.parent;
-            if (raft == null || !raft.name.StartsWith("Raft", StringComparison.Ordinal)) continue;
-
-            _raftPivot = t;
-            break;
+            Transform raftTransform = raftComponent.gameObject.transform;
+            foreach (Transform child in raftTransform)
+            {
+                if (child.name == "RotatePivot")
+                {
+                    foreach (Transform grandchild in child)
+                    {
+                        if (grandchild.name == "LockedPivot" && IsValid(grandchild))
+                        {
+                            _raftPivot = grandchild;
+                            break;
+                        }
+                    }
+                    break;
+                }
+            }
         }
-
+        if (_raftPivot == null)
+        {
+            foreach (Transform t in Resources.FindObjectsOfTypeAll<Transform>())
+            {
+                if (t == null) continue;
+                if (!t.gameObject.scene.IsValid()) continue;
+                if (!t.gameObject.activeInHierarchy) continue;
+                if (t.name != "LockedPivot") continue;
+                Transform rotatePivot = t.parent;
+                if (rotatePivot == null || rotatePivot.name != "RotatePivot") continue;
+                Transform raft = rotatePivot.parent;
+                if (raft == null || !raft.name.StartsWith("Raft", StringComparison.Ordinal)) continue;
+                _raftPivot = t;
+                break;
+            }
+        }
         if (_raftPivot != null && (resetBaseline || _lastRaftT <= 0f))
         {
             _lastRaftPos = _raftPivot.position;
@@ -180,41 +177,36 @@ public class Main : Mod
     private float ComputeRaftSpeed()
     {
         if (_raftPivot == null) return 0f;
-
         float now = Time.time;
         float dt = Mathf.Max(now - _lastRaftT, 0.0001f);
         Vector3 pos = _raftPivot.position;
-        float speed = (pos - _lastRaftPos).magnitude / dt;
-
+        float speed = Mathf.Min((pos - _lastRaftPos).magnitude / dt, MaxValidSpeed);
         _lastRaftPos = pos;
         _lastRaftT = now;
-
-        return speed > MaxValidSpeed ? 0f : speed;
+        return speed;
     }
 
     private void UpdateLabels()
     {
-        _deadIds.Clear();
         bool speedChanged = _lastAppliedSpeedText != _cachedSpeedText;
         int filled = GaugeFilled(_speed);
 
-        foreach (var kv in _receiverSpeed)
+        foreach (var kv in _receiverSpeed.ToList())
         {
             if (!IsReceiverAlive(kv.Key, kv.Value, out var gauge))
             {
-                _deadIds.Add(kv.Key);
+                RemoveForReceiver(kv.Key);
                 continue;
             }
             if (speedChanged) kv.Value.text = _cachedSpeedText;
             if (!_receiverGaugeState.TryGetValue(kv.Key, out int last) || last != filled)
             {
-                gauge.text = _gaugeCache[filled];
+                gauge.text = BuildGaugeString(filled);
                 _receiverGaugeState[kv.Key] = filled;
             }
         }
 
         _lastAppliedSpeedText = _cachedSpeedText;
-        foreach (int id in _deadIds) RemoveForReceiver(id);
     }
 
     private void ScanReceivers(bool forceRebind)
@@ -258,23 +250,17 @@ public class Main : Mod
 
     private void RemoveDeadTracked()
     {
-        _deadIds.Clear();
-        foreach (var kv in _receiverSpeed)
-            if (!IsReceiverAlive(kv.Key, kv.Value, out _)) _deadIds.Add(kv.Key);
-        foreach (int id in _deadIds) RemoveForReceiver(id);
+        foreach (var id in _receiverSpeed.Keys.Where(k => !IsReceiverAlive(k, _receiverSpeed[k], out _)).ToList())
+            RemoveForReceiver(id);
     }
 
     private void RefreshReceiverCache()
     {
         _receiverCache.Clear();
-        foreach (Transform tr in Resources.FindObjectsOfTypeAll<Transform>())
-        {
-            if (tr == null) continue;
-            if (!tr.gameObject.scene.IsValid()) continue;
-            if (!tr.gameObject.activeInHierarchy) continue;
-            if (!tr.name.StartsWith("Placeable_Reciever", StringComparison.Ordinal)) continue;
-            _receiverCache.Add(tr);
-        }
+        _receiverCache.AddRange(Resources.FindObjectsOfTypeAll<Transform>()
+            .Where(tr => tr != null && tr.gameObject.scene.IsValid() &&
+                        tr.gameObject.activeInHierarchy &&
+                        tr.name.StartsWith("Placeable_Reciever", StringComparison.Ordinal)));
     }
 
     private void RemoveForReceiver(int id)
@@ -375,21 +361,13 @@ public class Main : Mod
         CreateLabel(root, receiverId, "SPD", "SPD 0.0 m/s", ReceiverOffset, -1f, reference);
 
     private TextMeshProUGUI CreateGaugeLabel(Transform root, int receiverId, TMP_Text reference) =>
-        CreateLabel(root, receiverId, "Gauge", _gaugeCache[0], GaugeOffset, -2f, reference);
+        CreateLabel(root, receiverId, "Gauge", BuildGaugeString(0), GaugeOffset, -2f, reference);
 
     private static int GaugeFilled(float speed) =>
         Mathf.Clamp(Mathf.RoundToInt(speed / GaugeMaxSpeed * GaugeBlocks), 0, GaugeBlocks);
 
-    private static string[] BuildGaugeCache()
-    {
-        var arr = new string[GaugeBlocks + 1];
-        string em = GaugeMspaceEm.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture);
-
-        for (int filled = 0; filled <= GaugeBlocks; filled++)
-            arr[filled] = "<mspace=" + em + "em>" + new string('#', filled) + new string('.', GaugeBlocks - filled) + "</mspace>";
-
-        return arr;
-    }
+    private static string BuildGaugeString(int filled) =>
+        $"<mspace={GaugeMspaceEm:0.0}em>{new string('#', filled)}{new string('.', GaugeBlocks - filled)}</mspace>";
 
     private static bool IsValid(Transform t) =>
         t != null && t.gameObject != null && t.gameObject.scene.IsValid() && t.gameObject.activeInHierarchy;
