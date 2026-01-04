@@ -29,8 +29,6 @@ public class Main : Mod
     private const float GaugeMspaceEm = 0.6f;
     // ==================================================
 
-    private static readonly Color LabelColor = new Color(0.63f, 0.89f, 0.87f, 1.0f);
-
     private float _nextSpeedUpdate;
     private float _nextReceiverScan;
     private float _nextPivotScan;
@@ -219,24 +217,22 @@ public class Main : Mod
     {
         _deadIds.Clear();
 
-        bool speedChanged = !string.Equals(_lastAppliedSpeedText, _cachedSpeedText, StringComparison.Ordinal);
-        int filled = GaugeFilled(_speed);
-
         foreach (var kv in _receiverSpeed)
         {
             int id = kv.Key;
             var spd = kv.Value;
 
-            if (!IsAlive(spd))
+            if (spd == null || spd.gameObject == null || !spd.gameObject.scene.IsValid())
             {
                 _deadIds.Add(id);
                 continue;
             }
 
-            if (speedChanged)
+            if (!string.Equals(_lastAppliedSpeedText, _cachedSpeedText, StringComparison.Ordinal))
                 spd.text = _cachedSpeedText;
 
-            if (_receiverGauge.TryGetValue(id, out var g) && IsAlive(g))
+            int filled = GaugeFilled(_speed);
+            if (_receiverGauge.TryGetValue(id, out var g) && g != null && g.gameObject.scene.IsValid())
             {
                 int last;
                 if (!_receiverGaugeState.TryGetValue(id, out last) || last != filled)
@@ -304,7 +300,7 @@ public class Main : Mod
 
         foreach (var kv in _receiverSpeed)
         {
-            if (!IsAlive(kv.Value))
+            if (kv.Value == null || kv.Value.gameObject == null || !kv.Value.gameObject.scene.IsValid())
                 _deadIds.Add(kv.Key);
         }
 
@@ -370,13 +366,6 @@ public class Main : Mod
         return null;
     }
 
-    private static bool IsAlive(Component component)
-    {
-        return component != null &&
-               component.gameObject != null &&
-               component.gameObject.scene.IsValid();
-    }
-
     private static TextMeshProUGUI CreateSpeedLabel(Transform root, int receiverId, TMP_Text reference)
     {
         GameObject go = new GameObject("ReceiverSpeedometer_SPD_" + receiverId);
@@ -393,7 +382,7 @@ public class Main : Mod
             tmp.font = reference.font;
             tmp.fontSharedMaterial = reference.fontSharedMaterial;
 
-            tmp.color = LabelColor;
+            tmp.color = new Color(0.63f, 0.89f, 0.87f, 1.0f);
 
             tmp.fontStyle = reference.fontStyle;
             tmp.characterSpacing = reference.characterSpacing;
@@ -412,7 +401,7 @@ public class Main : Mod
         }
         else
         {
-            tmp.color = LabelColor;
+            tmp.color = new Color(0.63f, 0.89f, 0.87f, 1.0f);
             tmp.enableAutoSizing = false;
             tmp.fontSize = FallbackFontSize;
         }
@@ -441,7 +430,7 @@ public class Main : Mod
             tmp.font = reference.font;
             tmp.fontSharedMaterial = reference.fontSharedMaterial;
 
-            tmp.color = LabelColor;
+            tmp.color = new Color(0.63f, 0.89f, 0.87f, 1.0f);
 
             tmp.fontStyle = reference.fontStyle;
             tmp.characterSpacing = reference.characterSpacing;
@@ -460,7 +449,7 @@ public class Main : Mod
         }
         else
         {
-            tmp.color = LabelColor;
+            tmp.color = new Color(0.63f, 0.89f, 0.87f, 1.0f);
             tmp.enableAutoSizing = false;
             tmp.fontSize = FallbackFontSize;
         }
