@@ -233,11 +233,7 @@ public class Main : Mod
             int id = kv.Key;
             var spd = kv.Value;
 
-            bool spdAlive = IsAlive(spd);
-            bool hasGauge = _receiverGauge.TryGetValue(id, out var gAliveCheck);
-            bool gaugeAlive = hasGauge && IsAlive(gAliveCheck);
-
-            if (!spdAlive || !gaugeAlive)
+            if (!IsReceiverAlive(id, spd, out var gauge))
             {
                 _deadIds.Add(id);
                 continue;
@@ -246,18 +242,11 @@ public class Main : Mod
             if (speedChanged)
                 spd.text = _cachedSpeedText;
 
-            if (gaugeAlive)
+            int last;
+            if (!_receiverGaugeState.TryGetValue(id, out last) || last != filled)
             {
-                int last;
-                if (!_receiverGaugeState.TryGetValue(id, out last) || last != filled)
-                {
-                    gAliveCheck.text = _gaugeCache[filled];
-                    _receiverGaugeState[id] = filled;
-                }
-            }
-            else
-            {
-                _receiverGaugeState.Remove(id);
+                gauge.text = _gaugeCache[filled];
+                _receiverGaugeState[id] = filled;
             }
         }
 
@@ -266,14 +255,7 @@ public class Main : Mod
         for (int i = 0; i < _deadIds.Count; i++)
         {
             int id = _deadIds[i];
-
-            _receiverSpeed.Remove(id);
-
-            if (_receiverGauge.TryGetValue(id, out var g) && g != null)
-                Destroy(g.gameObject);
-            _receiverGauge.Remove(id);
-
-            _receiverGaugeState.Remove(id);
+            RemoveForReceiver(id);
         }
     }
 
@@ -341,24 +323,14 @@ public class Main : Mod
 
         foreach (var kv in _receiverSpeed)
         {
-            int id = kv.Key;
-            bool spdAlive = IsAlive(kv.Value);
-            bool gaugeAlive = _receiverGauge.TryGetValue(id, out var g) && IsAlive(g);
-            if (!spdAlive || !gaugeAlive)
+            if (!IsReceiverAlive(kv.Key, kv.Value, out _))
                 _deadIds.Add(kv.Key);
         }
 
         for (int i = 0; i < _deadIds.Count; i++)
         {
             int id = _deadIds[i];
-
-            _receiverSpeed.Remove(id);
-
-            if (_receiverGauge.TryGetValue(id, out var g) && g != null)
-                Destroy(g.gameObject);
-            _receiverGauge.Remove(id);
-
-            _receiverGaugeState.Remove(id);
+            RemoveForReceiver(id);
         }
 
     }
@@ -390,6 +362,18 @@ public class Main : Mod
         _receiverGauge.Remove(id);
 
         _receiverGaugeState.Remove(id);
+    }
+
+    private bool IsReceiverAlive(int id, TextMeshProUGUI speedLabel, out TextMeshProUGUI gaugeLabel)
+    {
+        gaugeLabel = null;
+        if (!IsAlive(speedLabel))
+            return false;
+
+        if (!_receiverGauge.TryGetValue(id, out gaugeLabel))
+            return false;
+
+        return IsAlive(gaugeLabel);
     }
 
     private static Canvas FindReceiverCanvas(Transform receiver)
