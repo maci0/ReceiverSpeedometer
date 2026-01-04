@@ -227,7 +227,10 @@ public class Main : Mod
             int id = kv.Key;
             var spd = kv.Value;
 
-            if (!IsAlive(spd))
+            bool spdAlive = IsAlive(spd);
+            bool gaugeAlive = _receiverGauge.TryGetValue(id, out var gAliveCheck) && IsAlive(gAliveCheck);
+
+            if (!spdAlive || !gaugeAlive)
             {
                 _deadIds.Add(id);
                 continue;
@@ -277,7 +280,12 @@ public class Main : Mod
 
             int id = tr.gameObject.GetInstanceID();
 
-            if (!forceRebind && _receiverSpeed.ContainsKey(id) && _receiverGauge.ContainsKey(id))
+            bool hasSpeed = _receiverSpeed.TryGetValue(id, out var existingSpeed);
+            bool hasGauge = _receiverGauge.TryGetValue(id, out var existingGauge);
+            bool speedAlive = hasSpeed && IsAlive(existingSpeed);
+            bool gaugeAlive = hasGauge && IsAlive(existingGauge);
+
+            if (!forceRebind && speedAlive && gaugeAlive)
                 continue;
 
             Canvas canvas = FindReceiverCanvas(tr);
@@ -304,7 +312,10 @@ public class Main : Mod
 
         foreach (var kv in _receiverSpeed)
         {
-            if (!IsAlive(kv.Value))
+            int id = kv.Key;
+            bool spdAlive = IsAlive(kv.Value);
+            bool gaugeAlive = _receiverGauge.TryGetValue(id, out var g) && IsAlive(g);
+            if (!spdAlive || !gaugeAlive)
                 _deadIds.Add(kv.Key);
         }
 
