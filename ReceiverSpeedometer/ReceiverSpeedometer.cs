@@ -14,7 +14,7 @@ public class Main : Mod
     private const float SpeedUpdateInterval = 0.15f;
     private const float ReceiverScanInterval = 20.0f;
     private const float RaftPivotScanInterval = 3.0f;
-    private const float ReceiverCacheScanInterval = 60.0f;
+    private const float ReceiverCacheScanInterval = 15.0f;
 
     // Fast bootstrapping when loaded from main menu
     private const float BootstrapScanInterval = 0.5f;     // keep low, runs only until bound
