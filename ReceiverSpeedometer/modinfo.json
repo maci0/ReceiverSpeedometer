@@ -1,5 +1,5 @@
 {
-  "name": "ReceiverSpeedometer",
+  "name": "Receiver Speedometer",
   "author": "maci",
   "description": "Displays the raft speed on the receiver screen.",
   "version": "1.1.0",
@@ -7,7 +7,7 @@
   "icon": "icon.png",
   "banner": "banner.jpg",
   "gameVersion": "1.0.9",
-  "updateUrl": "https://www.raftmodding.com/api/v1/mods/receiver-speedometer/version.txt",
+  "updateUrl": "https://raw.githubusercontent.com/maci0/ReceiverSpeedometer/main/version.txt",
   "isModPermanent": false,
   "excludedFiles": []
 }
